@@ -1,0 +1,84 @@
+# Per-repo configuration: the single source of truth for what the conductor knows about each
+# repository it releases. This is a small SAMPLE with generic names; a real deployment lists
+# every repository on its release train.
+#
+# Schema for each repo:
+#
+#   classification: platform | service | meta | other
+#   docker_image: backup                    # image name, if it differs from the repo name
+#   jenkins_param: BACKUP_IMAGE             # services only: the functional-test job parameter
+#   pre_bump:                               # only if a VERSION.txt-style bump PR is needed
+#     files: [VERSION.txt]
+#   chart_locations:                        # every version line for this repo in the charts repo
+#     - file: relative/path/in/charts/repo.yaml
+#       key: dotted.key.path
+#       format: raw_tag | image_with_tag
+#       tag_prefix: client-                 # optional, prepended to the new tag
+#
+# Format semantics:
+#   raw_tag         the value IS the tag ("5.199.0" or "master_a1b2c3")
+#   image_with_tag  the value is "namespace/image:tag"; the bump keeps "namespace/image:" and
+#                   any packaged-version prefix, and replaces the rest of the tag
+#
+# File-name convention: paths containing /stg/ or ending in /stg.yaml are bumped at the stg
+# testing stage; /prd/ or /prd.yaml at the production promotion stage.
+
+repos:
+  api:
+    classification: platform
+    chart_locations:
+      - {file: deploy/api/stg.yaml, key: global.image.tag, format: raw_tag}
+      - {file: deploy/api/prd.yaml, key: global.image.tag, format: raw_tag}
+
+  web-console:
+    classification: platform
+    chart_locations:
+      - {file: deploy/web-console/stg.yaml, key: global.image.tag, format: raw_tag}
+      - {file: deploy/web-console/prd.yaml, key: global.image.tag, format: raw_tag}
+
+  workloads-controller:
+    classification: platform
+    chart_locations:
+      - {file: deploy/workloads-controller/stg.yaml, key: controller.image.tag, format: raw_tag}
+      - {file: deploy/workloads-controller/prd.yaml, key: controller.image.tag, format: raw_tag}
+
+  service-backup:
+    classification: service
+    docker_image: backup
+    jenkins_param: BACKUP_IMAGE
+    pre_bump:
+      files: [VERSION.txt, package.json, package-lock.json]
+    chart_locations:
+      - {file: deploy/api/stg.yaml, key: configs.provisioning.envs.DEFAULT_BACKUP_IMAGE, format: image_with_tag}
+      - {file: deploy/api/prd.yaml, key: configs.provisioning.envs.DEFAULT_BACKUP_IMAGE, format: image_with_tag}
+
+  service-nginx:
+    classification: service
+    docker_image: nginx
+    jenkins_param: WEBSERVER_IMAGE
+    pre_bump:
+      files: [VERSION.txt]
+    chart_locations:
+      - {file: deploy/api/stg.yaml, key: configs.provisioning.envs.DEFAULT_WEBSERVER_IMAGE, format: image_with_tag}
+      - {file: deploy/api/prd.yaml, key: configs.provisioning.envs.DEFAULT_WEBSERVER_IMAGE, format: image_with_tag}
+
+  service-jenkins:
+    classification: service
+    docker_image: jenkins
+    jenkins_param: CI_IMAGE
+    pre_bump:
+      files: [VERSION.txt]
+    chart_locations:
+      - {file: deploy/api/stg.yaml, key: configs.provisioning.envs.DEFAULT_CI_IMAGE, format: image_with_tag}
+      - {file: deploy/api/prd.yaml, key: configs.provisioning.envs.DEFAULT_CI_IMAGE, format: image_with_tag}
+
+  charts:
+    classification: meta
+
+# Which images are public vs private on the registry (messaging only; the live registry check is
+# the source of truth).
+docker_visibility:
+  api: private
+  backup: public
+  nginx: public
+  jenkins: public
