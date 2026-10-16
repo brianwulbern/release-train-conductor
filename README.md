@@ -163,6 +163,6 @@ demo.py                end-to-end demo
 tests/                 the extracted production tests plus tests for the showcase parts
 ```
 
-## License
+## Notice
 
-MIT. See `LICENSE`.
+All rights reserved, no license granted. See `NOTICE.md`.
