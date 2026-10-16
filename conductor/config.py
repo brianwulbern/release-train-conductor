@@ -30,6 +30,10 @@ SLACK_CHANNEL_DEFAULT = "#releases"
 # Slack member ids (U...) @-mentioned on the production-promote post so the charts reviewers
 # get pinged. Empty here; a deployment lists its reviewers.
 SLACK_PROMOTE_REVIEWERS: list = []
+# The release channel (#releases) the announcement and thread lookups use, and the
+# workspace its message links point at.
+SLACK_CHANNEL_ID = "C0EXAMPLE01"
+SLACK_WORKSPACE_URL = "https://slack.example.com"
 # Skin-tone modifier for skin-tonable emoji in posts. The API sends emoji literally, so it
 # does not inherit the poster's own preference. "" = default yellow.
 SLACK_SKIN_TONE = "🏻"  # light

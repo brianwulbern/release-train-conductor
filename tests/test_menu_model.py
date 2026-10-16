@@ -28,13 +28,14 @@ def test_empty_cycle_relabels_the_finished_step_to_a_close_out_note():
     assert len(row.label) <= 32  # fits the label column so every hint lines up
 
 
-def test_platform_tests_are_advisory_on_a_services_only_train():
+def test_both_test_steps_are_regular_on_a_services_only_train():
     actions = menu._build_actions(
         _state([M.RepoEntry(repo="service-backup", classification="service")]), {})
-    row = actions[5]
-    assert row.disabled_reason == "" and row.soft_reason.startswith("not needed")
-    kind, picked = menu._resolve_choice("6", actions)
-    assert kind == "run" and picked is row  # dimmed, but still selectable
+    for i, label in ((5, "Trigger platform tests"), (6, "Trigger services tests")):
+        row = actions[i]
+        assert row.label == label and row.disabled_reason == "" and not row.soft_reason
+        kind, picked = menu._resolve_choice(str(i + 1), actions)
+        assert kind == "run" and picked is row
 
 
 def test_prd_bump_waits_for_release_tags():

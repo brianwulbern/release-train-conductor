@@ -20,9 +20,12 @@ import requests
 
 from . import config
 
+CONVERSATIONS_HISTORY = "https://slack.com/api/conversations.history"
 CHAT_POST_MESSAGE = "https://slack.com/api/chat.postMessage"
 PINS_ADD = "https://slack.com/api/pins.add"
 PINS_REMOVE = "https://slack.com/api/pins.remove"
+SCHEDULE_MESSAGE = "https://slack.com/api/chat.scheduleMessage"
+DELETE_SCHEDULED = "https://slack.com/api/chat.deleteScheduledMessage"
 
 # (ok, error, ts) - `ts` is the posted message's Slack timestamp id, the handle a
 # follow-up reply passes as `thread_ts` to land in the same thread. Only the token
@@ -207,6 +210,24 @@ def _post_via_token(
     return False, f"Slack API error: {err}{hint}", None, None
 
 
+def channel_history(channel: str, oldest: Optional[float] = None, limit: int = 200,
+                    token: Optional[str] = None) -> Optional[list]:
+    """Top-level messages in `channel` (an id), newest first, or None when the token
+    is missing or can't read history (needs the channels:history user scope)."""
+    tok = token or config.get_slack_token()
+    if not tok:
+        return None
+    params = {"channel": channel, "limit": limit}
+    if oldest:
+        params["oldest"] = f"{oldest:.6f}"
+    try:
+        data = requests.get(CONVERSATIONS_HISTORY, headers={"Authorization": f"Bearer {tok}"},
+                            params=params, timeout=15).json()
+    except (requests.RequestException, ValueError):
+        return None
+    return data.get("messages", []) if data.get("ok") else None
+
+
 def _post_via_webhook(text: str, url: str, channel: Optional[str]) -> PostResultEx:
     payload = {"text": text}
     if channel:
@@ -218,3 +239,65 @@ def _post_via_webhook(text: str, url: str, channel: Optional[str]) -> PostResult
     if resp.status_code == 200 and (resp.text or "").strip().lower() == "ok":
         return True, None, None, None
     return False, f"HTTP {resp.status_code}: {(resp.text or '').strip()[:200]}", None, None
+
+
+def schedule_message(
+    text: str,
+    post_at: int,
+    channel: str,
+    thread_ts: Optional[str] = None,
+    broadcast: bool = False,
+    token: Optional[str] = None,
+) -> Tuple[bool, Optional[str], Optional[str]]:
+    """Have Slack post `text` at `post_at` (epoch seconds) via
+    `chat.scheduleMessage`: Slack holds it and posts it on time, so nothing on
+    this machine has to be running then. Token path only (a webhook can't
+    schedule); same `chat:write` scope as posting. `thread_ts` + `broadcast`
+    behave as in post_message. Returns (ok, error, scheduled_message_id)."""
+    tok = token or config.get_slack_token()
+    if not tok:
+        return False, "no Slack user token", None
+    payload = {"channel": channel, "post_at": int(post_at), "text": text}
+    if thread_ts:
+        payload["thread_ts"] = thread_ts
+        if broadcast:
+            payload["reply_broadcast"] = True
+    try:
+        resp = requests.post(
+            SCHEDULE_MESSAGE,
+            headers={"Authorization": f"Bearer {tok}"},
+            json=payload,
+            timeout=15,
+        )
+        data = resp.json()
+    except (requests.RequestException, ValueError) as e:
+        return False, str(e), None
+    if data.get("ok"):
+        return True, None, data.get("scheduled_message_id")
+    err = data.get("error") or "unknown"
+    hint = " (post_at must be in the future)" if err == "time_in_past" else ""
+    return False, f"Slack API error: {err}{hint}", None
+
+
+def delete_scheduled_message(
+    channel: str, scheduled_message_id: str, token: Optional[str] = None,
+) -> Tuple[bool, Optional[str]]:
+    """Cancel a pending scheduled message (`chat.deleteScheduledMessage`).
+    Returns (ok, error). `invalid_scheduled_message_id` usually means it already
+    posted (or was already cancelled), which the caller reports as such."""
+    tok = token or config.get_slack_token()
+    if not tok:
+        return False, "no Slack user token"
+    try:
+        resp = requests.post(
+            DELETE_SCHEDULED,
+            headers={"Authorization": f"Bearer {tok}"},
+            json={"channel": channel, "scheduled_message_id": scheduled_message_id},
+            timeout=15,
+        )
+        data = resp.json()
+    except (requests.RequestException, ValueError) as e:
+        return False, str(e)
+    if data.get("ok"):
+        return True, None
+    return False, f"Slack API error: {data.get('error') or 'unknown'}"

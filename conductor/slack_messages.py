@@ -10,9 +10,38 @@ Emoji: standard ones are literal Unicode (what the operator types by hand);
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import List, Optional, Sequence, Tuple
 
 from . import config
+
+
+def gmt_label(cutoff: datetime) -> str:
+    """`Tue Sep 29, 16:30 GMT` for a UTC datetime - the shared reference time."""
+    u = cutoff.astimezone(timezone.utc)
+    return f"{u:%a %b} {u.day}, {u:%H:%M} GMT"
+
+
+def all_aboard(cutoff: datetime, now: datetime) -> str:
+    """The door-closing warning (`a` utility): when scope freezes for this train.
+
+    Uses Slack date tokens so every reader sees the cutoff in THEIR timezone and a
+    countdown that stays live ("in 3 hours", later "2 hours ago") instead of text
+    frozen at posting time. The explicit GMT time rides alongside as the one shared
+    reference; each token's `|fallback` is plain text for clients that can't render
+    tokens (notifications, email digests)."""
+    epoch = int(cutoff.timestamp())
+    hours = max(1, round((cutoff - now).total_seconds() / 3600))
+    gmt = gmt_label(cutoff)
+    hm = f"{cutoff.astimezone(timezone.utc):%H:%M}"
+    # Absolute date on purpose: the "pretty" token renders a capitalized "Today" /
+    # "Tomorrow" mid-sentence, which Slack won't let us lowercase.
+    local = f"<!date^{epoch}^{{date_short}} at {{time}}|{gmt}>"
+    countdown = f"<!date^{epoch}^{{ago}}|in {hours} hour{'s' if hours != 1 else ''}>"
+    # "Doors close" rather than "will be closing": the countdown flips to "3 hours
+    # ago" after the cutoff, and this wording still reads right then.
+    return (f"All aboard the release train 🚂 Doors close {local} "
+            f"your time ({hm} GMT, {countdown}).")
 
 
 def closing_the_door() -> str:
@@ -38,6 +67,15 @@ def stg_bump(pr_url: str) -> str:
 def release_tags_cut(tags: Sequence[Tuple[str, str]]) -> str:
     """Pre-release tags cut (option 5). `tags` = [(repo, tag_url), …]."""
     lines = ["pre-release tags cut:", *[url for _repo, url in tags]]
+    return "\n".join(lines)
+
+
+def release_tags_recut(items: Sequence[Tuple[str, str, str, str]]) -> str:
+    """Release tags re-cut to include work merged after the cut (option 5).
+    `items` = [(repo, tag_url, mode, short_sha), …], mode 'move' | 'new'."""
+    lines = ["release tags re-cut to include later commits:"]
+    for _repo, url, mode, short in items:
+        lines.append(f"{url} (moved to {short})" if mode == "move" else f"{url} (new tag at {short})")
     return "\n".join(lines)
 
 

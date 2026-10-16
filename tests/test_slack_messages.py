@@ -103,3 +103,21 @@ def test_close_the_door_no_token_does_not_record(tmp_path, monkeypatch):
     monkeypatch.setattr(slack_thread.slack_client, "method", lambda: None)
     assert slack_thread.close_the_door(p, quiet=True) is False
     assert not M.read_manifest(p).door_closed()
+
+
+def test_a_landed_thread_post_is_noted(monkeypatch, tmp_path, capsys):
+    """Every Slack post that lands says where it went and what it said (operator
+    ask 2026-10-01: option 12 broadcast 'Syncing ArgoCD' without a word)."""
+    from conductor import manifest as M, slack_client, slack_thread
+    path = tmp_path / "release-2026-10-01.json"
+    M.write_manifest(M.Manifest(release_version_id="1", release_label="2026-10-01",
+                                generated_at="x"), path)
+    monkeypatch.setattr(slack_client, "method", lambda: "token")
+    monkeypatch.setattr(slack_thread.slack_roots, "get_root", lambda label, vid=None: ("C1", "111.1"))
+    monkeypatch.setattr(slack_client, "post_message", lambda *a, **k: (True, None, "222.2"))
+    assert slack_thread.post_update(path, "📢 Syncing ArgoCD for Release Train 2026-10-01\nmore",
+                                    broadcast=True, quiet=True) == "222.2"
+    assert capsys.readouterr().out == ("  ↪ Slack: posted to the release thread + channel: "
+                                       "📢 Syncing ArgoCD for Release Train 2026-10-01\n")
+    slack_thread.post_update(path, "Platform testing (463)")
+    assert "posted to the release thread: Platform testing (463)" in capsys.readouterr().out

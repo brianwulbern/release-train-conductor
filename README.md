@@ -71,6 +71,10 @@ the next announcement picked a stale version from a month earlier. The shift onl
 this run also strips the train's own label, so re-running finalize never advances the ladder
 twice. `ladder.assess` diagnoses a degraded ladder and plans the same date-anchored repair.
 
+Finalize also names every other ticket still open on the version and checks whether its work
+shipped. Tickets with an unmerged PR, or no merged PR at all, are offered a move to the train that
+just became CURRENT, so releasing the version doesn't quietly mark unshipped work as released.
+
 `park` is finalize's sibling for a train that missed its window: the ladder moves on, but the
 missed train stays unreleased with its tickets intact, to ship later.
 
@@ -102,12 +106,20 @@ guards each one, so opening the same step twice doesn't post twice, and the acti
 recorded when the post actually lands. Everything here is best effort. With no token, or no
 thread root, or any Slack error, the post is skipped and the release step's result is untouched.
 
+Finding the thread doesn't depend on one machine (`conductor/slack_roots.py`). Roots are stored
+by train date and by tracker version id, so a train renamed to a later date keeps its thread. A
+lookup that misses locally scans the channel for the newest announcement linking the train's
+version, then reads a marker line the announcement wrote into the version's description, so a
+second operator finds the same thread. The scope freeze ("closing the door") can be scheduled:
+Slack holds the post and sends it at the announced cutoff, and closing early cancels it first, so
+the channel gets exactly one door post.
+
 ### The menu's gating (`conductor/menu.py`)
 
-Running the tool with no arguments opens a phase-aware menu. Each step shows as available,
-hard-disabled (with the reason in place of its hint), or advisory: dimmed but still selectable,
-for a step you probably don't want right now, such as platform tests on a services-only train.
-A train with nothing merged gets its own close-out path instead of a wall of disabled steps.
+Running the tool with no arguments opens a phase-aware menu. Every step is always listed in the
+same place, either available or disabled with the reason in place of its hint, so the numbers
+never shift and nothing is hidden. A train with nothing merged gets its own close-out path
+instead of a wall of disabled steps, and a release tag that work has merged past offers a re-cut.
 
 ## Try the demo
 
@@ -143,7 +155,8 @@ conductor/
   slack_roots.py       thread roots keyed by train
   slack_thread.py      best-effort, idempotent threaded posts
   menu.py              the menu's state detection and gating
-  commands/            finalize, park, scope, recap, release steps
+  commands/            finalize, park, scope, recap, release steps, and the two
+                       release-article checks finalize and recap ask
   config.py            placeholders and env var names (no secrets in code)
   mocks.py             fake tracker, GitHub and Slack servers
 demo.py                end-to-end demo

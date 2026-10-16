@@ -80,6 +80,11 @@ from . import release_steps
 
 
 CURRENT_SUFFIX = " (CURRENT)"
+
+# Keys of the open tickets the last `run()` found whose work didn't ship (an
+# unmerged PR, or no merged PR at all). The menu reads this after its preview to
+# ask whether to move them before it applies.
+_last_unshipped: List[str] = []
 TARGET_RESOLUTION = "Fixed"
 TARGET_STATUS_NAME = "Closed"  # the status we want bugs to land in
 
@@ -441,6 +446,35 @@ def run(args) -> int:
             if open_subs:
                 bug_open_subtasks[key] = open_subs
 
+    # 6a-3. Plan: other tickets still open on this version. Releasing it leaves them
+    # attached ("ignore unresolved"), so name them, and single out the ones whose
+    # work didn't ship (an unmerged PR, or no merged PR found) - those belong on the
+    # next train. Bugs are handled above; the release-steps ticket closes below.
+    global _last_unshipped
+    release_ticket_key = jira_progress._release_ticket(mf)  # noqa: SLF001 - same package
+    by_key = {t.key: t for t in mf.tickets}
+    leftovers: List[Tuple[str, str, str, bool, str]] = []  # (key, summary, status, unshipped, why)
+    for issue in issues:
+        key = issue.get("key", "")
+        status = _issue_status_name(issue)
+        if (_issue_type_name(issue).lower() == "bug" or key == release_ticket_key
+                or status.lower() == TARGET_STATUS_NAME.lower()):
+            continue
+        summary = ((issue.get("fields") or {}).get("summary") or "")[:60]
+        t = by_key.get(key)
+        if t is None:
+            leftovers.append((key, summary, status, False, "not in the manifest; refresh to check"))
+        elif t.unmerged_prs:
+            n = len(t.unmerged_prs)
+            leftovers.append((key, summary, status, True, f"{n} unmerged PR{'s' if n != 1 else ''}"))
+        elif not t.pr_urls:
+            leftovers.append((key, summary, status, True, "no merged PR found"))
+        else:
+            leftovers.append((key, summary, status, False, "merged PR(s) shipped"))
+    unshipped = [k for k, _s, _st, u, _w in leftovers if u]
+    _last_unshipped = list(unshipped)
+    move_unshipped = getattr(args, "move_unshipped", None)  # True / False / None = ask
+
     # 6b. Plan: shift future-cycle labels (NEXT → CURRENT, OVERNEXT → NEXT, etc.)
     # and then create any missing ladder slots so CURRENT/NEXT/OVERNEXT/SUBSEQUENT
     # stay fully populated. Both need the project's versions - fetch once.
@@ -514,7 +548,6 @@ def run(args) -> int:
     # 6d. Plan: close the release-steps PARENT ticket itself. Once its subtasks are
     # all done, the "[Release] Release Steps …" ticket should close too. (Closed
     # after the subtasks below, since Jira gates the parent on subtask resolution.)
-    release_ticket_key = jira_progress._release_ticket(mf)  # noqa: SLF001 - same package
     release_ticket_close: Optional[Tuple[str, str]] = None
     if release_ticket_key:
         try:
@@ -527,10 +560,8 @@ def run(args) -> int:
 
     # 6e. Reminder: a pre-bump service-* repo released this cycle needs a published
     # service article (support requirement). Surface-only - never actioned here.
-    service_articles = [
-        r for r in getattr(mf, "repos", [])
-        if r.release_tag and r.classification == "service" and r.needs_pre_bump
-    ]
+    from . import article as _article
+    service_articles = [] if _article.published_url(mf) else _article.needs_article(mf)
 
     # 7. Print the plan
     print()
@@ -560,6 +591,17 @@ def run(args) -> int:
               f"{' - --no-close-subtasks to skip' if not already_finalized else ''})")
     if bugs_already_closed:
         print(f"  · ({bugs_already_closed} Bug ticket(s) already Closed)")
+
+    if leftovers:
+        print(f"  · {len(leftovers)} other open ticket(s) on this version:")
+        for key, summary, status, u, why in leftovers:
+            print(f"      {key:15s} [{status}]  {summary}  ({why})")
+        if unshipped:
+            n = len(unshipped)
+            when = ("yes (--move-unshipped)" if move_unshipped is True
+                    else "no, they stay" if move_unshipped is False
+                    else "asked before any change (or pass --move-unshipped)")
+            print(f"  • move the {n} whose work didn't ship to the new (CURRENT) train: {when}")
 
     if already_finalized:
         print(f"  · advance the train (shift labels + extend ladder + steps): skipped -")
@@ -639,10 +681,11 @@ def run(args) -> int:
         print(f"\n  ⚠ Service article reminder (required by support) - publish one for:")
         for r in service_articles:
             print(f"      {r.repo} {r.release_tag}")
+        print("    Draft it with: conductor article")
 
     if not (plan_rename or plan_release or bugs_to_close or shifts or open_subtasks
             or ladder_creations or release_steps_plan or release_latest_flips
-            or release_ticket_close):
+            or release_ticket_close or unshipped):
         print("\nNothing to do - version is already finalized.")
         # Already-done releases still need the pin released so you can advance -
         # re-running finalize is the natural thing to try when you're stuck on a
@@ -665,6 +708,19 @@ def run(args) -> int:
         if confirm not in ("y", "yes"):
             print("Cancelled.")
             return 0
+
+    if unshipped and move_unshipped is None:
+        if args.yes:
+            move_unshipped = False
+            print(f"\n  · leaving {len(unshipped)} unshipped ticket(s) on this version "
+                  f"(pass --move-unshipped to move them to the new (CURRENT) train)")
+        else:
+            try:
+                ans = input(f"\nMove {len(unshipped)} ticket(s) whose work didn't ship "
+                            f"({', '.join(unshipped)}) to the new (CURRENT) train? (y/N): ")
+            except (EOFError, KeyboardInterrupt):
+                ans = ""
+            move_unshipped = ans.strip().lower() in ("y", "yes")
 
     # 8. Execute
     print()
@@ -776,6 +832,35 @@ def run(args) -> int:
             failures += 1
             print(f"  ✗ create failed '{name}': {e}")
 
+    # Move the tickets whose work didn't ship onto the train that is now (CURRENT)
+    # (the label shift above made it so). Same fixVersion swap as `scope defer`:
+    # drop this version, add the new CURRENT, keep any other fixVersions.
+    if unshipped and move_unshipped:
+        try:
+            target = jira_client.find_current_version(config.JIRA_PROJECT, jira_token)
+        except (Exception, SystemExit):
+            target = None
+        if not target or str(target.get("id")) == str(version_id):
+            print("  · couldn't find the new (CURRENT) train - move the unshipped "
+                  f"ticket(s) by hand: {', '.join(unshipped)}")
+        else:
+            tid, tname = str(target.get("id")), target.get("name")
+            for key in unshipped:
+                try:
+                    issue = jira_client.fetch_issue(key, jira_token, fields=["fixVersions"])
+                    ids = [str(v.get("id")) for v in
+                           ((issue.get("fields") or {}).get("fixVersions") or [])]
+                    new_ids = [i for i in ids if i != str(version_id)]
+                    if tid not in new_ids:
+                        new_ids.append(tid)
+                    jira_client.update_issue_fix_versions(key, new_ids, jira_token)
+                    print(f"  ✓ {key}: moved to '{tname}' (its work didn't ship on {release_label})")
+                    M.record_action(manifest_path, "jira",
+                                    f"{key} fixVersion → {tname} (didn't ship on {release_label})")
+                except (Exception, SystemExit) as e:
+                    failures += 1
+                    print(f"  ✗ {key}: move failed ({e})")
+
     # Clone the release-steps ticket for each newly-created train (after the
     # versions exist), tagging it with that train's version so `announce` finds
     # it. Best-effort: a failure here is reported, not fatal.
@@ -831,7 +916,8 @@ def run(args) -> int:
     # Re-surface the support reminder after the writes, so it isn't scrolled off.
     if service_articles:
         print(f"\n  ⚠ Don't forget: publish a service article (support requirement) for "
-              f"{', '.join(f'{r.repo} {r.release_tag}' for r in service_articles)}.")
+              f"{', '.join(f'{r.repo} {r.release_tag}' for r in service_articles)} "
+              f"(draft: conductor article).")
 
     # Reconcile the manifest's ticket statuses with live Jira, so downstream reads
     # (recap, menu, `manifest show`) reflect the closures finalize just made rather

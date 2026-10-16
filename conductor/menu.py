@@ -2,12 +2,8 @@
 
 Running `conductor` with no arguments opens a phase-aware menu. It reads the release manifest,
 works out where the train is (nothing in scope yet, stg testing, tagging, ready for
-production), and renders every step with one of three looks:
-
-  * available (plain),
-  * hard-disabled (`·`, not selectable, with the reason in place of the hint), or
-  * advisory (`·`, but STILL selectable: "you probably don't want this", e.g. platform tests
-    on a services-only release, which then asks for a y/N confirmation).
+production), and lists every step, always in the same place: available (plain) or disabled
+(`·`, not selectable, with the reason in place of the hint). Steps are never hidden.
 
 `PipelineState`, `_detect_state`, `MenuAction`, `_build_actions`, `_print_actions` and
 `_resolve_choice` below are the real implementation, extracted as-is. The production menu also
@@ -50,6 +46,13 @@ _act_finalize_apply = _stub("finalize")
 _act_announce = _stub("announce")
 
 
+def _release_images_offered(mf) -> bool:
+    """Stand-in: the production menu offers a deploy-only test run on the release images
+    once its CI job has recorded a full run. That check reads the CI server, so the
+    showcase never offers it."""
+    return False
+
+
 @dataclass
 class PipelineState:
     manifest_path: Optional[Path] = None
@@ -63,6 +66,7 @@ class PipelineState:
     scope_count: int = 0                 # platform+service repos in scope (0 ⇒ empty/early)
     active_pinned: bool = False          # True if the manifest came from an `conductor use` pin
     in_flight_count: int = 0             # unfinished manifests (genuine cycle overlap)
+    finalized: bool = False              # finalize --apply recorded: the train has shipped
 
 
 def _detect_state() -> PipelineState:
@@ -79,6 +83,7 @@ def _detect_state() -> PipelineState:
         return s
     s.manifest = mf
     s.release_label = mf.release_label
+    s.finalized = bool(mf.actions_for("finalize"))
 
     # Tagging/phase gating must mirror what `release tag` actually acts on -
     # platform AND service repos (see release_tag._classification_needs_tag).
@@ -138,8 +143,14 @@ def _build_actions(state: PipelineState, prefs: dict) -> List[MenuAction]:
     scope_reason = EMPTY_MSG if empty else ("" if has_manifest else "no manifest yet")
 
     has_untagged = state.untagged_count > 0
-    can_tag = has_untagged and not empty
-    tag_reason = EMPTY_MSG if empty else ("" if has_untagged else "all tags already cut")
+    late_repos = state.manifest.repos_with_commits_after_tag() if state.manifest else []
+    can_tag = (has_untagged or bool(late_repos)) and not empty
+    tag_reason = EMPTY_MSG if empty else ("" if can_tag else "all tags already cut")
+    if not empty and late_repos and not has_untagged:
+        tag_hint = "re-cut to include later commits: " + ", ".join(
+            f"{r.repo} +{len(r.commits_after_tag)}" for r in late_repos)
+    else:
+        tag_hint = "preview → create GitHub pre-releases (auto notes)"
 
     can_prd = has_release_tags and not empty
     prd_reason = EMPTY_MSG if empty else ("" if has_release_tags else "release tags not cut yet")
@@ -160,17 +171,6 @@ def _build_actions(state: PipelineState, prefs: dict) -> List[MenuAction]:
         pre_bump_hint, pre_bump_reason, pre_bump_fn = (
             "no repos need VERSION.txt pre-bump", "no repos need pre-bump", None)
 
-    # Test path: a services-only (or charts-only) release doesn't need platform
-    # tests. Give option 6 an ADVISORY dot (`soft_reason`) - dimmed like a disabled
-    # step, but STILL selectable, and picking it hits a y/N pre-confirm in
-    # `_act_trigger_tests`. A dot that warns "you probably don't want this," not a lock.
-    test_path = state.manifest.classify_test_path() if (pipeline_ok and state.manifest) else None
-    if test_path == "services":
-        platform_soft = "not needed - services-only release (confirm to run)"
-    elif test_path == "none":
-        platform_soft = "not needed - charts-only release (confirm to run)"
-    else:
-        platform_soft = ""
 
     # Ordered by pipeline flow:
     #   manifest → pre-bump → stg bump → release tags → tests → prd bump → cluster sync
@@ -207,7 +207,7 @@ def _build_actions(state: PipelineState, prefs: dict) -> List[MenuAction]:
         # scans the most lead time and avoids scan-timeout failures downstream.
         MenuAction(
             label="Cut release tags",
-            hint="preview → create GitHub pre-releases (auto notes)" if can_tag else tag_reason,
+            hint=tag_hint if can_tag else tag_reason,
             disabled_reason="" if can_tag else tag_reason,
             run_fn=_act_release_tag_apply if can_tag else None,
         ),
@@ -215,12 +215,13 @@ def _build_actions(state: PipelineState, prefs: dict) -> List[MenuAction]:
             label="Trigger platform tests",
             hint="opens Jenkins build form in browser" if pipeline_ok else "",
             disabled_reason=scope_reason,
-            soft_reason=platform_soft if pipeline_ok else "",
             run_fn=_act_trigger_tests_platform if pipeline_ok else None,
         ),
         MenuAction(
             label="Trigger services tests",
-            hint="opens Jenkins form with image params pre-filled" if pipeline_ok else "",
+            hint=(("full run done; next: deploy run on the release tags (QA projects → released images)"
+                   if _release_images_offered(state.manifest) else
+                   "opens Jenkins form with image params pre-filled") if pipeline_ok else ""),
             disabled_reason=scope_reason,
             run_fn=_act_trigger_tests_services if pipeline_ok else None,
         ),
@@ -296,7 +297,10 @@ def _print_actions(actions: List[MenuAction], utilities: List[MenuAction]) -> No
     if utilities:
         print("  Utilities:")
         for u in utilities:
-            print(_row(" ", u.key or "", u.label, u.hint))
+            # Same `·` convention as the numbered steps: a greyed-out utility shows
+            # why it can't run in place of its hint.
+            marker = "·" if (u.disabled_reason or u.soft_reason) else " "
+            print(_row(marker, u.key or "", u.label, u.disabled_reason or u.soft_reason or u.hint))
     print(_row(" ", "q", "Quit", ""))
 
 

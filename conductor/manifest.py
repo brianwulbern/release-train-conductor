@@ -97,6 +97,11 @@ class RepoEntry:
     # (the `1.31.2-` base version). services_jenkins_params() prefers it over the
     # reconstructed `{version_txt}-{target_tag}`. None if not resolved (no creds).
     published_image_tag: Optional[str] = None
+    # Commits on the default branch AFTER this train's release tag, oldest first,
+    # as [{sha, title}] - work merged past the cut that the tag (and so the stg
+    # bump and tests) doesn't include. Empty when the tag is at HEAD or untagged.
+    # `release tag --recut` pulls them in on purpose (option 5 offers it).
+    commits_after_tag: List[dict] = field(default_factory=list)
 
     def prebump_done(self) -> bool:
         """True if this repo's VERSION.txt pre-bump is already done for the cycle.
@@ -147,11 +152,71 @@ class Manifest:
                 return a.get("slack_channel"), a["slack_thread_ts"]
         return None
 
-    def door_closed(self) -> bool:
+    def door_closed(self, now: Optional[dt.datetime] = None) -> bool:
         """True once the scope-freeze ("closing the door") has been posted this
-        cycle - recorded as a `close_door` action. The `d` utility and the auto
-        close-on-first-bump both guard on this so the freeze posts at most once."""
-        return any(a.get("stage") == "close_door" for a in self.actions)
+        cycle - recorded as a `close_door` action - OR once the door post that
+        Slack was scheduled to make (by the `a` utility) is due: the latest
+        `door_warning` carries a `door_scheduled_id` and its cutoff has passed.
+        The `d` utility and the auto close-on-first-bump both guard on this so the
+        freeze posts at most once."""
+        if any(a.get("stage") == "close_door" for a in self.actions):
+            return True
+        latest = self._latest_door_warning()
+        if latest and latest.get("door_scheduled_id"):
+            cutoff = self.door_cutoff()
+            now = now or dt.datetime.now(dt.timezone.utc)
+            return cutoff is not None and cutoff <= now
+        return False
+
+    def _latest_door_warning(self) -> Optional[dict]:
+        for a in reversed(self.actions):
+            if a.get("stage") == "door_warning" and a.get("door_at"):
+                return a
+        return None
+
+    def pending_door_post(
+        self, now: Optional[dt.datetime] = None,
+    ) -> Optional[Tuple[str, str]]:
+        """(channel, scheduled_message_id) of the door post Slack still has
+        queued (the latest `door_warning`'s schedule, cutoff not yet reached), or
+        None. Callers cancel it when the door is closed early or re-announced."""
+        if any(a.get("stage") == "close_door" for a in self.actions):
+            return None
+        latest = self._latest_door_warning()
+        if not latest or not latest.get("door_scheduled_id"):
+            return None
+        cutoff = self.door_cutoff()
+        now = now or dt.datetime.now(dt.timezone.utc)
+        if cutoff is None or cutoff <= now:
+            return None
+        return latest.get("door_channel"), latest["door_scheduled_id"]
+
+    def door_cutoff(self) -> Optional[dt.datetime]:
+        """The announced door-closing time (UTC) from the latest `door_warning`
+        action (the `a` "All aboard" utility), or None if none was posted. The
+        latest wins, so re-posting with a later time moves the cutoff."""
+        latest = self._latest_door_warning()
+        if not latest:
+            return None
+        try:
+            return dt.datetime.fromisoformat(latest["door_at"])
+        except (TypeError, ValueError):
+            return None
+
+    def partly_merged_tickets(self) -> List["TicketEntry"]:
+        """Tickets with at least one MERGED PR and at least one still-open PR:
+        shipping the train now would ship part of the ticket (e.g. the api half
+        of a change whose console half is still in review)."""
+        return [t for t in self.tickets if t.pr_urls and t.unmerged_prs]
+
+    def partial_override_keys(self) -> set:
+        """Ticket keys the release manager chose to ship partly (recorded
+        `partial_override` actions), so a later step doesn't block on them again."""
+        keys: set = set()
+        for a in self.actions:
+            if a.get("stage") == "partial_override":
+                keys.update(a.get("tickets") or [])
+        return keys
 
     def test_scope_keys(self) -> Optional[List[str]]:
         """The tested-scope baseline: the ticket keys considered already-tested for
@@ -166,6 +231,10 @@ class Manifest:
              `scope` (test_trigger freezes `[t.key for t in mf.tickets]` at trigger).
              Re-triggering tests records more `test` actions but never moves the
              baseline (only #1 does) - a flaky re-run can't silently bless a late add.
+          3. A re-cut resets the auto baseline: the first `test` after the latest
+             `release_recut` tested the re-cut images, which carry everything then
+             in scope, so it becomes the cutoff. Whichever of (1) and (3) is later
+             wins.
 
         Survives Refresh because the action log is carried forward across rebuilds.
         Returns None when neither source exists - callers treat that as 'no
@@ -175,6 +244,14 @@ class Manifest:
             a for a in self.actions
             if a.get("stage") == "scope_baseline" and a.get("scope") is not None
         ]
+        recuts = [a.get("at") or "" for a in self.actions_for("release_recut")]
+        after_recut = next(
+            (a for a in self.actions
+             if a.get("stage") == "test" and a.get("scope") is not None
+             and recuts and (a.get("at") or "") > max(recuts)), None)
+        if after_recut and (not rebaselined
+                            or (after_recut.get("at") or "") > (rebaselined[-1].get("at") or "")):
+            return list(after_recut.get("scope") or [])
         if rebaselined:
             return list(rebaselined[-1].get("scope") or [])  # latest re-baseline wins
         for a in self.actions:  # oldest first - the earliest trigger is the cutoff
@@ -193,6 +270,17 @@ class Manifest:
             return []
         frozen = set(scope)
         return [t for t in self.tickets if t.key not in frozen]
+
+    def repos_with_commits_after_tag(self) -> List["RepoEntry"]:
+        """Tagged repos whose default branch has moved past the release tag."""
+        return [r for r in self.repos if r.release_tag and r.commits_after_tag]
+
+    def tests_predate_recut(self) -> bool:
+        """True when a release tag was re-cut after the latest functional-test
+        trigger, so the tests ran on images the train no longer ships."""
+        recuts = [a.get("at") or "" for a in self.actions_for("release_recut")]
+        tests = [a.get("at") or "" for a in self.actions_for("test")]
+        return bool(recuts and tests and max(recuts) > max(tests))
 
     def charts_pr_actions(
         self, stages=("bump_stg", "bump_prd", "promote"),
@@ -226,7 +314,7 @@ class Manifest:
             return "services"
         return "none"
 
-    def services_jenkins_params(self) -> Dict[str, str]:
+    def services_jenkins_params(self, release: bool = False) -> Dict[str, str]:
         """Build {param_name: docker_tag} for runStackFunctionalTestsForRelease.
 
         Returns just the docker tag (post-colon), not the full image string -
@@ -250,6 +338,11 @@ class Manifest:
             param = jenkins_params.get(r.repo)
             if not param or not r.target_tag:
                 continue
+            # `release=True`: the release tag itself (what prd will run), for the
+            # deploy-only run that leaves the QA projects on the released images.
+            if release and r.release_tag:
+                params[param] = r.release_tag
+                continue
             # Prefer the real published Docker Hub tag (source of truth); else
             # reconstruct - version_txt prefix for pre-versioned repos, else the
             # bare master tag.
@@ -261,6 +354,15 @@ class Manifest:
                 tag = r.target_tag
             params[param] = tag
         return params
+
+    def release_images_ready(self) -> bool:
+        """True when every service repo the services run takes an image for has a
+        release tag whose image is confirmed on Docker Hub, so a deploy-only run
+        can move the QA projects onto the released images."""
+        jenkins_params = repos_config.jenkins_param_map()
+        svc = [r for r in self.repos if jenkins_params.get(r.repo) and r.target_tag]
+        return bool(svc) and all(
+            r.release_tag and r.release_image_status == "confirmed" for r in svc)
 
     def judge_bump_kind(self, repo_entry: "RepoEntry") -> str:
         """Decide 'patch' vs 'minor' for a repo from its contributing tickets'

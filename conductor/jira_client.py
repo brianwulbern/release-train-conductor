@@ -398,6 +398,7 @@ def update_version(
     release_date: Optional[str] = None,
     start_date: Optional[str] = None,
     archived: Optional[bool] = None,
+    description: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Update fields on a Jira version.
 
@@ -419,6 +420,8 @@ def update_version(
         body["startDate"] = start_date
     if archived is not None:
         body["archived"] = archived
+    if description is not None:
+        body["description"] = description
     if not body:
         return {}
     return _put(f"/rest/api/2/version/{version_id}", body, token)

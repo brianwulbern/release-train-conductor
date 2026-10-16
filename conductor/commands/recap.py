@@ -39,6 +39,7 @@ _STAGE_LABELS = {
     "finalize": "finalize",
     "jira": "jira",
     "announce": "announce",
+    "article": "article",
 }
 
 
@@ -150,11 +151,13 @@ def build_recap(mf: M.Manifest, markdown: bool = False) -> List[str]:
 
     # ── Follow-ups ───────────────────────────────────────────────────────────
     followups: List[str] = []
-    for r in _shipped(mf):
-        if r.classification == "service" and r.needs_pre_bump:
-            followups.append(
-                f"service article required (support) - {r.repo} {r.release_tag}"
-            )
+    from . import article as _article
+    if not _article.published_url(mf):
+        for r in _shipped(mf):
+            if r.classification == "service" and r.needs_pre_bump:
+                followups.append(
+                    f"service article required (support) - {r.repo} {r.release_tag}"
+                )
     open_bugs = [
         t for t in mf.tickets
         if (t.issue_type or "").strip().lower() == "bug"
