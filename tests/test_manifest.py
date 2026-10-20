@@ -171,3 +171,31 @@ def test_latest_and_active(tmp_path, monkeypatch):
     M.clear_active()
     assert M.get_active_path() is None
     assert M.default_manifest_path().name == "release-2026-06-11.json"
+
+
+def test_manifest_writes_its_format_and_reads_old_files(tmp_path):
+    import json as _json
+    from conductor import manifest as _M
+    mf = _M.Manifest(release_version_id="1", release_label="2026-10-20", generated_at="x")
+    p = _M.write_manifest(mf, tmp_path / "m.json")
+    data = _json.loads(p.read_text())
+    assert data["format"] == _M.FORMAT
+    data.pop("format")
+    p.write_text(_json.dumps(data))
+    assert _M.read_manifest(p).release_label == "2026-10-20"
+
+
+
+
+def test_shipped_by_names_the_earlier_train_that_carried_the_tag():
+    from conductor import manifest as _M
+    def mf(label, tag):
+        return _M.Manifest(release_version_id="1", release_label=label, generated_at="x",
+                           repos=[_M.RepoEntry(repo="service-nginx", classification="service",
+                                               release_tag=tag)])
+    _M.write_manifest(mf("2026-10-15", "6.12.0"))
+    _M.write_manifest(mf("2026-10-20", "6.12.0"))
+    assert _M.shipped_by("service-nginx", "6.12.0", "2026-10-20") == "2026-10-15"
+    assert _M.shipped_by("service-nginx", "6.12.0", "2026-10-15") is None
+    assert _M.shipped_by("service-nginx", "6.13.0", "2026-10-20") is None
+    assert _M.shipped_by("api", "6.12.0", "2026-10-20") is None

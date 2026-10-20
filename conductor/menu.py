@@ -175,7 +175,7 @@ def _build_actions(state: PipelineState, prefs: dict) -> List[MenuAction]:
     # Ordered by pipeline flow:
     #   manifest → pre-bump → stg bump → release tags → tests → prd bump → cluster sync
     # (tags precede tests so security scans start as early as possible.)
-    return [
+    actions = [
         MenuAction(
             label="Refresh manifest",
             hint=(f"conductor manifest build {state.manifest.release_version_id} (pinned) "
@@ -278,6 +278,31 @@ def _build_actions(state: PipelineState, prefs: dict) -> List[MenuAction]:
             run_fn=_act_announce,
         ),
     ]
+    if state.finalized:
+        _grey_finalized(actions, state.manifest)
+    return actions
+
+
+FINALIZED_MSG = "train finalized; 1 loads the next train"
+
+
+def _grey_finalized(actions: List[MenuAction], mf) -> None:
+    """A shipped train: steps 3-13 can't run, except 7 while the deploy run on the
+    release images is still due; 14, and 15 once the next train is announced, stay
+    selectable for a re-run."""
+    done = max((a.get("at") or "" for a in mf.actions_for("finalize")), default="") if mf else ""
+    announced = mf and any((a.get("at") or "") >= done for a in mf.actions_for("announce"))
+    deploy_due = (bool(mf and mf.release_images_ready())
+                  and not any(a.get("images") == "release" for a in mf.actions_for("test")))
+    for n, a in enumerate(actions, 1):
+        if n == 7 and deploy_due:
+            a.hint = "shipped; deploy run on the release tags moves the QA projects onto them"
+        elif 3 <= n <= 13 and not a.disabled_reason:
+            a.disabled_reason = FINALIZED_MSG
+        elif n == 14:
+            a.soft_reason = "done; rerun only to fix the Jira version"
+        elif n == 15 and announced:
+            a.soft_reason = "next train announced; rerun only to post it again"
 
 
 def _print_actions(actions: List[MenuAction], utilities: List[MenuAction]) -> None:

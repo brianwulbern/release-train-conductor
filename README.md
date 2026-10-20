@@ -44,11 +44,17 @@ scope with their target commits and release tags, and an append-only log of ever
 taken (PRs opened, tags cut, tests triggered, posts made). Because the log rides along when the
 manifest is rebuilt, progress is recorded rather than re-inferred, and the menu can show exactly
 where the train is. Reading is tolerant of schema changes: unknown keys are dropped and missing
-ones defaulted, so a field added next month doesn't break last month's file.
+ones defaulted, so a field added next month doesn't break last month's file. Each file also
+carries a format number: a change an older version would misread bumps it, and an older
+conductor refuses a newer file with a clear message instead of guessing at it.
 
 Derived decisions live on the manifest so every stage agrees: which test suite to run, the
 deploy sync order, and whether a repository's bump is a patch (every contributing ticket is a Bug)
-or a minor.
+or a minor. Two small guards came from real trains. A release tag an earlier train already
+shipped is never claimed again (`shipped_by`), so a train whose new work hasn't merged yet
+doesn't inherit last week's tag and report itself ready. And the release image's tag keeps the
+base prefix its master build carries (`release_image_tag`): an nginx release `6.13.0` is
+published as `1.31.3-6.13.0`, and asking for the bare version deploys nothing.
 
 ### Byte-minimal YAML edits (`conductor/yaml_edit.py`, `conductor/yaml_utils.py`)
 
@@ -69,7 +75,10 @@ matching the old label, so a ladder with a missing rung heals itself instead of 
 current train. That was a real incident: a label-matching shift once left no CURRENT at all, and
 the next announcement picked a stale version from a month earlier. The shift only happens when
 this run also strips the train's own label, so re-running finalize never advances the ladder
-twice. `ladder.assess` diagnoses a degraded ladder and plans the same date-anchored repair.
+twice. `ladder.assess` diagnoses a degraded ladder and plans the same date-anchored repair. A
+version created some other way (by hand in the tracker, say) gets no checklist ticket, so the
+ladder check also asks which rungs have none, in one search
+(`release_steps.rungs_without_steps`), and creates them on request.
 
 Finalize also names every other ticket still open on the version and checks whether its work
 shipped. Tickets with an unmerged PR, or no merged PR at all, are offered a move to the train that
@@ -120,6 +129,20 @@ Running the tool with no arguments opens a phase-aware menu. Every step is alway
 same place, either available or disabled with the reason in place of its hint, so the numbers
 never shift and nothing is hidden. A train with nothing merged gets its own close-out path
 instead of a wall of disabled steps, and a release tag that work has merged past offers a re-cut.
+Once a train is finalized, the steps it can no longer run grey out with one reason, except the
+deploy that moves the test environments onto the released images, which stays open until it has
+run.
+
+## Not in this extract
+
+The production tool does more around testing that depends on private CI and infrastructure, so
+it isn't included here: sorting a finished test run's failures into environment trouble, known
+issues (tickets carrying a label) and new failures, with a ticket draft for each new one and a
+yes/no prompt to file it; telling a partial rerun (one profile or a test filter) from a full run,
+so a rerun credits the tests it passed instead of replacing the run; naming the package and fixed
+version when a container vulnerability scan blocks an image; and testing a service on a pull
+request's image when its main branch can't produce one in time, with the run marked as such
+until a run on merged code replaces it.
 
 ## Try the demo
 

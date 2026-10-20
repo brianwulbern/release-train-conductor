@@ -93,6 +93,12 @@ def services_testing(build: object, url: Optional[str] = None) -> str:
     return f"Services testing ({ref}) :loading:"
 
 
+def triage_result(kind: str, build: object, url: Optional[str], result: str) -> str:
+    """A finished run's triage, as `t` offers to post it."""
+    ref = f"<{url}|{build}>" if url else f"{build}"
+    return f"{kind.capitalize()} tests ({ref}): {result}"
+
+
 def prd_bump(pr_url: str) -> str:
     """prd.yaml bump on develop (option 8)."""
     return f":review: pull to bump `prd.yaml` on `develop`\n{pr_url}"

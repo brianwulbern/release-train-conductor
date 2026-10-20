@@ -10,7 +10,7 @@ import json
 import re
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from . import config, repos_config
 
@@ -68,6 +68,7 @@ class RepoEntry:
     # for a private image without readable creds. Distinct from docker_image_status
     # above, which tracks the master_<sha> (stg) image.
     release_image_status: Optional[str] = None  # "confirmed" | "absent" | "unknown" | None
+    scan_block: Optional[Dict[str, Any]] = None
     needs_pre_bump: bool = False
     pre_bump_files: List[str] = field(default_factory=list)
     contributing_tickets: List[str] = field(default_factory=list)
@@ -102,6 +103,19 @@ class RepoEntry:
     # bump and tests) doesn't include. Empty when the tag is at HEAD or untagged.
     # `release tag --recut` pulls them in on purpose (option 5 offers it).
     commits_after_tag: List[dict] = field(default_factory=list)
+
+    def release_image_tag(self) -> Optional[str]:
+        """The Docker Hub tag of the release image, keeping any base prefix the
+        published master tag carries (nginx `1.31.3-6.13.0`, not `6.13.0`)."""
+        tag, pub = self.release_tag, self.published_image_tag
+        if not tag or not pub or not self.target_tag or not pub.endswith("-" + self.target_tag):
+            return tag
+        stem = pub[: -len(self.target_tag) - 1]
+        if stem == tag or stem.endswith("-" + tag):
+            return stem
+        if self.version_txt and stem.endswith(self.version_txt):
+            return stem[: -len(self.version_txt)] + tag
+        return tag
 
     def prebump_done(self) -> bool:
         """True if this repo's VERSION.txt pre-bump is already done for the cycle.
@@ -341,7 +355,7 @@ class Manifest:
             # `release=True`: the release tag itself (what prd will run), for the
             # deploy-only run that leaves the QA projects on the released images.
             if release and r.release_tag:
-                params[param] = r.release_tag
+                params[param] = r.release_image_tag()
                 continue
             # Prefer the real published Docker Hub tag (source of truth); else
             # reconstruct - version_txt prefix for pre-versioned repos, else the
@@ -437,6 +451,20 @@ def all_manifests() -> List[Path]:
     candidates = list(config.STATE_DIR.glob("release-*.json"))
     candidates.sort(key=_manifest_sort_key, reverse=True)
     return candidates
+
+
+def shipped_by(repo: str, tag: str, label: str) -> Optional[str]:
+    """Label of an earlier train whose manifest already carries `repo` at release
+    `tag`, or None."""
+    for p in all_manifests():
+        try:
+            mf = read_manifest(p)
+        except Exception:
+            continue
+        if mf.release_label < label and any(
+                r.repo == repo and r.release_tag == tag for r in mf.repos):
+            return mf.release_label
+    return None
 
 
 def find_latest_manifest() -> Optional[Path]:
@@ -628,6 +656,13 @@ def pinned_overrides(prior: "Manifest") -> Dict[str, str]:
     }
 
 
+FORMAT = 1
+
+
+class ManifestFormatError(ValueError):
+    pass
+
+
 def write_manifest(manifest: Manifest, out_path: Optional[Path] = None) -> Path:
     if out_path is None:
         config.ensure_state_dir()
@@ -635,13 +670,18 @@ def write_manifest(manifest: Manifest, out_path: Optional[Path] = None) -> Path:
         out_path = config.STATE_DIR / filename
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
-        json.dump(asdict(manifest), f, indent=2, sort_keys=False)
+        json.dump({"format": FORMAT, **asdict(manifest)}, f, indent=2, sort_keys=False)
     return out_path
 
 
 def read_manifest(path: Path) -> Manifest:
     with open(path) as f:
         data = json.load(f)
+    fmt = data.get("format", 1)
+    if not isinstance(fmt, int) or fmt > FORMAT:
+        raise ManifestFormatError(
+            f"{path} uses manifest format {fmt}, newer than this conductor reads ({FORMAT}); "
+            "upgrade conductor (git pull, then pip install --user .)")
 
     # Tolerant of schema evolution - drop unknown keys, default missing ones.
     ticket_fields = {fld.name for fld in fields(TicketEntry)}

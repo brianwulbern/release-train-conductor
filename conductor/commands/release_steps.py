@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 import sys
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .. import config, jira_client
 
@@ -227,6 +227,27 @@ def existing_for_date(date: str, token: str) -> List[str]:
         if date in summ and marker not in summ:
             keys.append(i.get("key"))
     return [k for k in keys if k]
+
+
+def rungs_without_steps(active, token) -> Optional[List[Tuple[str, str, str]]]:
+    """(date, version_id, name) for each active ladder rung that has no steps
+    ticket yet, from one search. None when the search fails."""
+    try:
+        found = jira_client.search_issues(
+            f'project = {config.JIRA_PROJECT} '
+            f'AND summary ~ "Release Steps for Release Train for" AND created >= -120d',
+            token, fields=["summary"])
+    except (Exception, SystemExit):
+        return None
+    marker = config.RELEASE_STEPS_TEMPLATE_MARKER.strip()
+    titles = [((i.get("fields") or {}).get("summary") or "") for i in found]
+    titles = [t for t in titles if marker not in t]
+    missing = []
+    for d, vid, name, _suf in active:
+        iso = d.isoformat()
+        if not any(iso in t for t in titles):
+            missing.append((iso, vid, name))
+    return missing
 
 
 def run(args) -> int:
