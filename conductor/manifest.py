@@ -104,6 +104,10 @@ class RepoEntry:
     # `release tag --recut` pulls them in on purpose (option 5 offers it).
     commits_after_tag: List[dict] = field(default_factory=list)
 
+    def ships(self) -> bool:
+        """Has a release tag this train ships, not one an earlier train shipped."""
+        return bool(self.release_tag) and self.tag_source != "shipped"
+
     def release_image_tag(self) -> Optional[str]:
         """The Docker Hub tag of the release image, keeping any base prefix the
         published master tag carries (nginx `1.31.3-6.13.0`, not `6.13.0`)."""

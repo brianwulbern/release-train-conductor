@@ -50,9 +50,12 @@ conductor refuses a newer file with a clear message instead of guessing at it.
 
 Derived decisions live on the manifest so every stage agrees: which test suite to run, the
 deploy sync order, and whether a repository's bump is a patch (every contributing ticket is a Bug)
-or a minor. Two small guards came from real trains. A release tag an earlier train already
+or a minor. A few small guards came from real trains. A release tag an earlier train already
 shipped is never claimed again (`shipped_by`), so a train whose new work hasn't merged yet
-doesn't inherit last week's tag and report itself ready. And the release image's tag keeps the
+doesn't inherit last week's tag and report itself ready. The same holds for a hotfix: when an
+off-cycle train ships a tag the next train's manifest also picked up, the next train sees it as
+already shipped (`RepoEntry.ships()`), so its recap and support-article follow-ups don't count
+that release a second time. And the release image's tag keeps the
 base prefix its master build carries (`release_image_tag`): an nginx release `6.13.0` is
 published as `1.31.3-6.13.0`, and asking for the bare version deploys nothing.
 

@@ -68,6 +68,15 @@ def test_followups_service_article_and_open_bug():
     assert "Bug(s) not yet Closed" in out and "REL-9" in out
 
 
+def test_a_hotfix_tag_an_earlier_train_shipped_is_not_shipped_again():
+    mf = _mf()
+    mf.repos.append(M.RepoEntry(repo="service-nginx", classification="service",
+                                release_tag="6.13.2", tag_source="shipped", needs_pre_bump=True))
+    out = _joined(R.build_recap(mf))
+    assert "Shipped (2 repos)" in out
+    assert "6.13.2" not in out
+
+
 def test_finalized_status_flips_on_finalize_action():
     assert "in flight" in _joined(R.build_recap(_mf()))
     fin = [{"at": "2026-08-04T09:00:00", "stage": "finalize", "summary": "done",

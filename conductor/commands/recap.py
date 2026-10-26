@@ -72,7 +72,7 @@ def _shipped(mf: M.Manifest):
     """Tagged platform/service repos - the artifacts production actually pulls."""
     return [
         r for r in mf.repos
-        if r.release_tag and r.classification in ("platform", "service")
+        if r.ships() and r.classification in ("platform", "service")
     ]
 
 
