@@ -13,6 +13,7 @@ private infrastructure.
 """
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -293,7 +294,8 @@ def _grey_finalized(actions: List[MenuAction], mf) -> None:
     done = max((a.get("at") or "" for a in mf.actions_for("finalize")), default="") if mf else ""
     announced = mf and any((a.get("at") or "") >= done for a in mf.actions_for("announce"))
     deploy_due = (bool(mf and mf.release_images_ready())
-                  and not any(a.get("images") == "release" for a in mf.actions_for("test")))
+                  and not any(a.get("images") in ("release", "release-full")
+                              for a in mf.actions_for("test")))
     for n, a in enumerate(actions, 1):
         if n == 7 and deploy_due:
             a.hint = "shipped; deploy run on the release tags moves the QA projects onto them"
@@ -336,9 +338,19 @@ def _resolve_choice(choice: str, actions: List[MenuAction],
         ("quit", None)        - q / quit / exit
         ("menu", None)        - empty input (return to / redraw the menu)
         ("run", MenuAction)   - a valid, enabled action to run
+        ("cli", argv)         - `conductor <command ...>`, run in place
         ("error", message)    - unparseable, out of range, or disabled
     """
-    c = (choice or "").strip().lower()
+    raw = (choice or "").strip()
+    if raw.split(" ", 1)[0].lower() == "conductor":
+        try:
+            argv = shlex.split(raw)[1:]
+        except ValueError as e:
+            return ("error", f"couldn't read that command: {e}")
+        if not argv or argv[0] == "menu":
+            return ("error", "you're already in the menu; type a command, e.g. conductor manifest show")
+        return ("cli", argv)
+    c = raw.lower()
     if c in ("q", "quit", "exit"):
         return ("quit", None)
     if not c:

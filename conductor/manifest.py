@@ -273,6 +273,14 @@ class Manifest:
                 return list(a.get("scope") or [])
         return None
 
+    def sole_ticket(self) -> Optional[str]:
+        """The train's only ticket, when it has no release-steps ticket and just one
+        ticket (a hotfix version), so steps can file their PRs under it."""
+        if any("Release Steps for Release Train" in (t.summary or "")
+               or (t.summary or "").lstrip().startswith("[Release]") for t in self.tickets):
+            return None
+        return self.tickets[0].key if len(self.tickets) == 1 else None
+
     def tickets_added_after_test(self) -> List["TicketEntry"]:
         """Tickets now in the manifest that were NOT in scope when testing started
         - i.e. added to the (CURRENT) fix-version after the functional-test trigger,

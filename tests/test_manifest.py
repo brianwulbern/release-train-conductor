@@ -199,3 +199,18 @@ def test_shipped_by_names_the_earlier_train_that_carried_the_tag():
     assert _M.shipped_by("service-nginx", "6.12.0", "2026-10-15") is None
     assert _M.shipped_by("service-nginx", "6.13.0", "2026-10-20") is None
     assert _M.shipped_by("api", "6.12.0", "2026-10-20") is None
+
+
+def test_sole_ticket_is_the_hotfix_ticket_only_without_a_steps_ticket():
+    from conductor import manifest as _M
+
+    def mf(*summaries):
+        return _M.Manifest(release_version_id="1", release_label="2026-10-23", generated_at="x",
+                           tickets=[_M.TicketEntry(key=f"REL-{i}", issue_id=str(i), summary=s, status="x")
+                                    for i, s in enumerate(summaries, 1)])
+    assert mf("Upgrade webserver nginx to 1.31.7").sole_ticket() == "REL-1"
+    assert mf("a", "b").sole_ticket() is None
+    assert mf("[Release] Release Steps for Release Train for 2026-10-27").sole_ticket() is None
+    assert mf().sole_ticket() is None
+
+

@@ -49,3 +49,8 @@ def test_every_label_fits_the_column():
     for repos in ([], [M.RepoEntry(repo="api", classification="platform", release_tag="1.0.0")]):
         for a in menu._build_actions(_state(repos), {}):
             assert len(a.label) <= 32, a.label
+
+
+def test_a_typed_command_runs_in_place():
+    assert menu._resolve_choice("conductor manifest show", []) == ("cli", ["manifest", "show"])
+    assert menu._resolve_choice("conductor menu", [])[0] == "error"
