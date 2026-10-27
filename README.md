@@ -148,7 +148,10 @@ that no ticket covers has already cleared the scan on the main branch, naming th
 offering to file a ticket for it, worded the way the team files these fixes, so the fix ships with
 the train instead of riding along untracked; and testing a service on a pull request's image when
 its main branch can't produce one in time, with the run marked as such until a run on merged code
-replaces it.
+replaces it. The last run of a train moves the shared test environments onto the released images;
+services the train didn't release would otherwise keep whatever an earlier run left there (often a
+main-branch build), so it lists the image production runs for each, read from the deployment
+config, and asks whether to move all, some or none of them too.
 
 ## Try the demo
 

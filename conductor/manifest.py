@@ -356,7 +356,8 @@ class Manifest:
         Services NOT in the current manifest leave their Jenkins field blank,
         which is the desired behavior - Jenkins uses its defaults for those
         (production-current images), avoiding the need to maintain a separate
-        "what's currently in prod for each service" snapshot.
+        "what's currently in prod for each service" snapshot. A repo whose tag an
+        earlier train already shipped (tag_source "shipped") is left blank too.
         """
         jenkins_params = repos_config.jenkins_param_map()
         params: Dict[str, str] = {}
@@ -368,6 +369,8 @@ class Manifest:
             # deploy-only run that leaves the QA projects on the released images.
             if release and r.release_tag:
                 params[param] = r.release_image_tag()
+                continue
+            if r.tag_source == "shipped":
                 continue
             # Prefer the real published Docker Hub tag (source of truth); else
             # reconstruct - version_txt prefix for pre-versioned repos, else the

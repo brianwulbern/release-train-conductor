@@ -212,5 +212,3 @@ def test_sole_ticket_is_the_hotfix_ticket_only_without_a_steps_ticket():
     assert mf("a", "b").sole_ticket() is None
     assert mf("[Release] Release Steps for Release Train for 2026-10-27").sole_ticket() is None
     assert mf().sole_ticket() is None
-
-
