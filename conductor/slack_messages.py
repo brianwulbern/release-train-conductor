@@ -10,6 +10,7 @@ Emoji: standard ones are literal Unicode (what the operator types by hand);
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import List, Optional, Sequence, Tuple
 
@@ -96,6 +97,8 @@ def services_testing(build: object, url: Optional[str] = None) -> str:
 def triage_result(kind: str, build: object, url: Optional[str], result: str) -> str:
     """A finished run's triage, as `t` offers to post it."""
     ref = f"<{url}|{build}>" if url else f"{build}"
+    result = re.sub(r"\b[A-Z][A-Z0-9]+-\d+\b",
+                    lambda m: f"<{config.JIRA_HOST}/browse/{m.group(0)}|{m.group(0)}>", result)
     return f"{kind.capitalize()} tests ({ref}): {result}"
 
 

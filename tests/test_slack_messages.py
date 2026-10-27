@@ -121,3 +121,12 @@ def test_a_landed_thread_post_is_noted(monkeypatch, tmp_path, capsys):
                                        "📢 Syncing ArgoCD for Release Train 2026-10-01\n")
     slack_thread.post_update(path, "Platform testing (463)")
     assert "posted to the release thread: Platform testing (463)" in capsys.readouterr().out
+
+
+def test_triage_result_links_the_build_and_each_ticket():
+    from conductor import config
+    from conductor.slack_messages import triage_result
+    text = triage_result("platform", 473, "https://ci/473/", "315 passed, 3 failed: all known (REL-53425, REL-53426)")
+    assert text == (f"Platform tests (<https://ci/473/|473>): 315 passed, 3 failed: all known "
+                    f"(<{config.JIRA_HOST}/browse/REL-53425|REL-53425>, "
+                    f"<{config.JIRA_HOST}/browse/REL-53426|REL-53426>)")

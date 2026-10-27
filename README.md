@@ -145,9 +145,10 @@ prompt to file it; telling a partial rerun (one profile or a test filter) from a
 rerun credits the tests it passed instead of replacing the run; naming the package and fixed
 version when a container vulnerability scan blocks an image, and, when a later dependency bump
 that no ticket covers has already cleared the scan on the main branch, naming that commit and
-asking for a ticket so the fix ships with the train instead of riding along untracked; and testing
-a service on a pull request's image when its main branch can't produce one in time, with the run
-marked as such until a run on merged code replaces it.
+offering to file a ticket for it, worded the way the team files these fixes, so the fix ships with
+the train instead of riding along untracked; and testing a service on a pull request's image when
+its main branch can't produce one in time, with the run marked as such until a run on merged code
+replaces it.
 
 ## Try the demo
 
