@@ -152,6 +152,17 @@ class Manifest:
     # menu can show real progress rather than re-inferring it.
     actions: List[dict] = field(default_factory=list)
 
+    def dropped_repos(self) -> List[str]:
+        """Repos taken out of this train with `manifest build --drop`, in drop order."""
+        out: List[str] = []
+        for a in self.actions:
+            repo = a.get("repo")
+            if a.get("stage") == "drop_repo" and repo not in out:
+                out.append(repo)
+            elif a.get("stage") == "undrop_repo" and repo in out:
+                out.remove(repo)
+        return out
+
     def actions_for(self, stage: str) -> List[dict]:
         """All recorded actions for a pipeline stage, oldest first."""
         return [a for a in self.actions if a.get("stage") == stage]

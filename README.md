@@ -58,6 +58,9 @@ already shipped (`RepoEntry.ships()`), so its recap and support-article follow-u
 that release a second time. And the release image's tag keeps the
 base prefix its master build carries (`release_image_tag`): an nginx release `6.13.0` is
 published as `1.31.3-6.13.0`, and asking for the bare version deploys nothing.
+A repository pulled from a train after its tag is cut (a regression found in testing) is
+recorded as an action rather than deleted from the file, so it stays out when the manifest is
+rebuilt and comes back only when someone says so (`dropped_repos`).
 
 ### Byte-minimal YAML edits (`conductor/yaml_edit.py`, `conductor/yaml_utils.py`)
 
