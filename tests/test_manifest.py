@@ -201,6 +201,23 @@ def test_shipped_by_names_the_earlier_train_that_carried_the_tag():
     assert _M.shipped_by("api", "6.12.0", "2026-10-20") is None
 
 
+def test_last_shipped_skips_carried_dropped_and_later_trains():
+    from conductor import manifest as _M
+    def mf(label, tag, source="auto", actions=()):
+        return _M.Manifest(release_version_id="1", release_label=label, generated_at="x",
+                           actions=list(actions),
+                           repos=[_M.RepoEntry(repo="service-provisioning", classification="platform",
+                                               release_tag=tag, tag_source=source)])
+    _M.write_manifest(mf("2026-10-15", "3.21.1"))
+    _M.write_manifest(mf("2026-10-22", "3.21.1", source="shipped"))
+    _M.write_manifest(mf("2026-10-27", "3.21.2", actions=[{"stage": "drop_repo",
+                                                             "repo": "service-provisioning"}]))
+    _M.write_manifest(mf("2026-11-05", "3.21.3"))
+    assert _M.last_shipped("service-provisioning", "2026-11-03") == ("3.21.1", "2026-10-15")
+    assert _M.last_shipped("service-provisioning", "2026-10-15") is None
+    assert _M.last_shipped("api", "2026-11-03") is None
+
+
 def test_sole_ticket_is_the_hotfix_ticket_only_without_a_steps_ticket():
     from conductor import manifest as _M
 

@@ -493,6 +493,21 @@ def shipped_by(repo: str, tag: str, label: str) -> Optional[str]:
     return None
 
 
+def last_shipped(repo: str, label: str) -> Optional[Tuple[str, str]]:
+    """(release tag, train label) of the newest earlier train that shipped `repo`."""
+    for p in all_manifests():
+        try:
+            mf = read_manifest(p)
+        except Exception:
+            continue
+        if mf.release_label >= label or repo in mf.dropped_repos():
+            continue
+        for r in mf.repos:
+            if r.repo == repo and r.ships():
+                return r.release_tag, mf.release_label
+    return None
+
+
 def find_latest_manifest() -> Optional[Path]:
     """Return the most-recent release-*.json in ~/.conductor/state/, or None.
 

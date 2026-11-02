@@ -52,7 +52,10 @@ Derived decisions live on the manifest so every stage agrees: which test suite t
 deploy sync order, and whether a repository's bump is a patch (every contributing ticket is a Bug)
 or a minor. A few small guards came from real trains. A release tag an earlier train already
 shipped is never claimed again (`shipped_by`), so a train whose new work hasn't merged yet
-doesn't inherit last week's tag and report itself ready. The same holds for a hotfix: when an
+doesn't inherit last week's tag and report itself ready. Likewise, when this train's newest
+commit for a repository is already inside the last release an earlier train shipped
+(`last_shipped`), and nothing of this train follows it, the repository has nothing new and
+isn't asked for another version bump. The same holds for a hotfix: when an
 off-cycle train ships a tag the next train's manifest also picked up, the next train sees it as
 already shipped (`RepoEntry.ships()`), so its recap and support-article follow-ups don't count
 that release a second time. And the release image's tag keeps the
