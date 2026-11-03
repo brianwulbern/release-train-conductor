@@ -64,6 +64,10 @@ published as `1.31.3-6.13.0`, and asking for the bare version deploys nothing.
 A repository pulled from a train after its tag is cut (a regression found in testing) is
 recorded as an action rather than deleted from the file, so it stays out when the manifest is
 rebuilt and comes back only when someone says so (`dropped_repos`).
+A ticket's PR that merged into a feature branch reads as merged but isn't in the release, so the
+build checks where each PR merged (`conductor/commands/off_branch.py`). Work on a branch that
+hasn't reached the default branch is listed as unmerged, with the last merged PR and the link to
+the open PR into the default branch, or to the page that opens one.
 
 ### Byte-minimal YAML edits (`conductor/yaml_edit.py`, `conductor/yaml_utils.py`)
 
