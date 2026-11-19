@@ -285,6 +285,11 @@ def _pick_close_transition(
     return None
 
 
+def _issue_status_done(issue: Dict[str, Any]) -> bool:
+    status = (issue.get("fields") or {}).get("status") or {}
+    return (status.get("statusCategory") or {}).get("key") == "done"
+
+
 def _issue_type_name(issue: Dict[str, Any]) -> str:
     return ((issue.get("fields") or {}).get("issuetype") or {}).get("name", "") or ""
 
@@ -462,7 +467,11 @@ def run(args) -> int:
             continue
         summary = ((issue.get("fields") or {}).get("summary") or "")[:60]
         t = by_key.get(key)
-        if t is None:
+        if _issue_type_name(issue).lower() == "epic":
+            leftovers.append((key, summary, status, False, "Epic, its work ships in its child tickets"))
+        elif _issue_status_done(issue):
+            leftovers.append((key, summary, status, False, f"already {status}"))
+        elif t is None:
             leftovers.append((key, summary, status, False, "not in the manifest; refresh to check"))
         elif t.unmerged_prs:
             n = len(t.unmerged_prs)

@@ -50,7 +50,7 @@ conductor refuses a newer file with a clear message instead of guessing at it.
 
 Derived decisions live on the manifest so every stage agrees: which test suite to run, the
 deploy sync order, and whether a repository's bump is a patch (every contributing ticket is a Bug)
-or a minor. A few small guards came from real trains. A release tag an earlier train already
+or a minor. A ticket flagged as a security fix always makes it a minor, and the plan says which ticket did it. A few small guards came from real trains. A release tag an earlier train already
 shipped is never claimed again (`shipped_by`), so a train whose new work hasn't merged yet
 doesn't inherit last week's tag and report itself ready. Likewise, when this train's newest
 commit for a repository is already inside the last release an earlier train shipped

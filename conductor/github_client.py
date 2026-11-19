@@ -58,10 +58,12 @@ def pr_payload(repo: str, number: int, token: str) -> Dict[str, Any]:
     return _get(f"/repos/{config.GITHUB_ORG}/{repo}/pulls/{number}", token) or {}
 
 
-def branch_prs(repo: str, head: str, base: str, token: str) -> List[Dict[str, Any]]:
-    """PRs (any state) from branch `head` into `base`, newest first."""
-    return _get(f"/repos/{config.GITHUB_ORG}/{repo}/pulls", token,
-                {"head": f"{config.GITHUB_ORG}:{head}", "base": base, "state": "all"}) or []
+def branch_prs(repo: str, head: str, base: Optional[str], token: str) -> List[Dict[str, Any]]:
+    """PRs (any state) from branch `head` into `base` (any base when None), newest first."""
+    params = {"head": f"{config.GITHUB_ORG}:{head}", "state": "all"}
+    if base:
+        params["base"] = base
+    return _get(f"/repos/{config.GITHUB_ORG}/{repo}/pulls", token, params) or []
 
 
 def compare_status(repo: str, base: str, head: str, token: str) -> Optional[str]:

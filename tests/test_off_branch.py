@@ -17,7 +17,9 @@ def _gh(monkeypatch, bases, compare="diverged", branch_prs=()):
         "number": n, "merged_at": merged[n], "base": {"ref": bases[n]}})
     monkeypatch.setattr(B.github_client, "get_default_branch", lambda repo, token: "master")
     monkeypatch.setattr(B.github_client, "compare_status", lambda repo, a, b, token: compare)
-    monkeypatch.setattr(B.github_client, "branch_prs", lambda repo, head, base, token: list(branch_prs))
+    by_head = branch_prs if isinstance(branch_prs, dict) else {"REL-54172": list(branch_prs)}
+    monkeypatch.setattr(B.github_client, "branch_prs", lambda repo, head, base, token: [
+        p for p in by_head.get(head, []) if base in (None, (p.get("base") or {}).get("ref"))])
 
 
 def test_prs_merged_into_a_feature_branch_are_not_on_master(monkeypatch):
@@ -36,7 +38,7 @@ def test_prs_merged_into_a_feature_branch_are_not_on_master(monkeypatch):
 
 def test_an_open_pr_to_master_is_the_next_step_and_not_listed_twice(monkeypatch):
     _gh(monkeypatch, {9489: "REL-54172", 9490: "REL-54172"},
-        branch_prs=[{"state": "open", "merged_at": None, "html_url": API + "9496"}])
+        branch_prs=[{"state": "open", "merged_at": None, "html_url": API + "9496", "base": {"ref": "master"}}])
     t = _ticket(9489, 9490, unmerged=[{"url": API + "9496", "state": "OPEN", "repo": "api"}])
     B._off_branch_prs([t], "t")
     [e] = t.unmerged_prs
@@ -47,10 +49,27 @@ def test_an_open_pr_to_master_is_the_next_step_and_not_listed_twice(monkeypatch)
 @pytest.mark.parametrize("compare,branch_prs", [
     ("behind", ()),
     ("identical", ()),
-    ("diverged", [{"state": "closed", "merged_at": "2026-10-30T00:00:00Z"}]),
+    ("diverged", [{"state": "closed", "merged_at": "2026-10-30T00:00:00Z", "base": {"ref": "master"}}]),
+    ("diverged", {
+        "REL-54172": [{"state": "closed", "merged_at": "2026-10-29T12:00:10Z", "base": {"ref": "REL-54100"}}],
+        "REL-54100": [{"state": "closed", "merged_at": "2026-10-30T00:00:00Z", "base": {"ref": "master"}}]}),
 ])
 def test_a_branch_that_reached_master_counts_as_merged(monkeypatch, compare, branch_prs):
     _gh(monkeypatch, {9489: "REL-54172", 9490: "REL-54172"}, compare, branch_prs)
     t = _ticket(9489, 9490)
     assert B._off_branch_prs([t], "t") == 0
     assert len(t.pr_urls) == 2 and t.unmerged_prs == []
+
+
+@pytest.mark.parametrize("branch_prs", [
+    [{"state": "closed", "merged_at": "2026-10-29T11:00:00Z", "base": {"ref": "master"}}],
+    {"REL-54172": [{"state": "closed", "merged_at": "2026-10-29T13:00:00Z", "base": {"ref": "REL-54100"}}],
+     "REL-54100": [{"state": "closed", "merged_at": "2026-10-29T12:30:00Z", "base": {"ref": "master"}}]},
+    {"REL-54172": [{"state": "closed", "merged_at": "2026-10-29T13:00:00Z", "base": {"ref": "REL-54100"}}],
+     "REL-54100": [{"state": "open", "merged_at": None, "base": {"ref": "master"}}]},
+])
+def test_a_branch_merge_before_the_last_pr_landed_does_not_count(monkeypatch, branch_prs):
+    _gh(monkeypatch, {9489: "REL-54172", 9490: "REL-54172"}, branch_prs=branch_prs)
+    t = _ticket(9489, 9490)
+    assert B._off_branch_prs([t], "t") == 1
+    assert t.pr_urls == [] and t.unmerged_prs[0]["state"] == "BRANCH"

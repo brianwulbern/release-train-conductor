@@ -48,6 +48,7 @@ class TicketEntry:
     # subtask - surfaced by `manifest show` so the operator can chase what's
     # blocking the release. Each: {"url", "state" ("OPEN"|"DRAFT"), "repo"}.
     unmerged_prs: List[dict] = field(default_factory=list)
+    security: bool = False
 
 
 @dataclass
@@ -301,12 +302,14 @@ class Manifest:
         - i.e. added to the (CURRENT) fix-version after the functional-test trigger,
         so they rode in untested. Empty when no test baseline exists (see
         `test_scope_keys`). The risky direction to surface: untested work going out.
+        An Epic carries no work of its own (its child tickets do), so it never counts.
         """
         scope = self.test_scope_keys()
         if scope is None:
             return []
         frozen = set(scope)
-        return [t for t in self.tickets if t.key not in frozen]
+        return [t for t in self.tickets
+                if t.key not in frozen and t.issue_type.lower() != "epic"]
 
     def repos_with_commits_after_tag(self) -> List["RepoEntry"]:
         """Tagged repos whose default branch has moved past the release tag."""
@@ -404,20 +407,28 @@ class Manifest:
         return bool(svc) and all(
             r.release_tag and r.release_image_status == "confirmed" for r in svc)
 
+    def bump_reason(self, repo_entry: "RepoEntry") -> Tuple[str, str]:
+        """(kind, why) for `judge_bump_kind`. Infosec policy (2026-11-03): a security
+        fix is a minor bump, so any contributing security ticket makes it minor."""
+        by_key = {t.key: t for t in self.tickets}
+        known = [by_key[k] for k in (repo_entry.contributing_tickets or []) if k in by_key]
+        sec = [t.key for t in known if t.security]
+        if sec:
+            return "minor", f"security fix {', '.join(sec)}"
+        types = [t.issue_type for t in known if t.issue_type]
+        if types and all(t.strip().lower() == "bug" for t in types):
+            return "patch", "bug-only"
+        return "minor", "has non-bug change"
+
     def judge_bump_kind(self, repo_entry: "RepoEntry") -> str:
         """Decide 'patch' vs 'minor' for a repo from its contributing tickets'
         Jira issue types this cycle: **patch** only when EVERY known contributing
-        ticket is a Bug; **minor** if any is a Task/Story/other non-bug - or if no
-        ticket types are known (conservative default, matches the historic
+        ticket is a Bug and none is a security fix; **minor** if any is a security
+        fix or a Task/Story/other non-bug - or if no ticket types are known (conservative default, matches the historic
         always-minor). Shared by `release tag` (non-pre-versioned repos) and
         `bump pre` (VERSION.txt repos) so both stages agree on the bump.
         """
-        by_key = {t.key: t for t in self.tickets}
-        types = [by_key[k].issue_type for k in (repo_entry.contributing_tickets or [])
-                 if k in by_key and by_key[k].issue_type]
-        if types and all(t.strip().lower() == "bug" for t in types):
-            return "patch"
-        return "minor"
+        return self.bump_reason(repo_entry)[0]
 
     def argocd_sync_order(self) -> List[str]:
         """Return repo names in the runbook-mandated sync order:

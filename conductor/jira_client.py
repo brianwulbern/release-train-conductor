@@ -191,6 +191,7 @@ def fetch_version_issues(
             "assignee",
             "description",  # scanned for PR links conductor's other signals miss
             config.JIRA_GIT_PR_FIELD,  # "Git Pull Request" - a directly-linked PR URL
+            config.JIRA_CROSS_CUTTING_FIELD,  # "Security Vulnerability" makes a fix a minor bump
         ]
 
     issues: List[Dict[str, Any]] = []

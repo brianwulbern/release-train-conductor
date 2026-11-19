@@ -47,6 +47,8 @@ JIRA_PROJECT = "REL"  # the tracker project that holds the release-train version
 
 # The tracker's "Git Pull Request" custom field (instance-specific id).
 JIRA_GIT_PR_FIELD = "customfield_10000"
+JIRA_CROSS_CUTTING_FIELD = "customfield_10001"
+JIRA_SECURITY_VULNERABILITY_ID = "10002"
 
 # The "[Release] Release Steps ... [TEMPLATE]" ticket cloned for each new train (a parent
 # Task + its checklist subtasks). Its summary carries a literal `YYYY-MM-DD [TEMPLATE]` token

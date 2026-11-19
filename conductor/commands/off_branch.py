@@ -21,7 +21,8 @@ from .. import config, github_client
 
 def _off_branch_prs(tickets, token) -> int:
     """Move each ticket's PRs that merged into a branch other than the repo's
-    default (and whose branch hasn't reached it since) out of pr_urls, into
+    default (and whose branch hasn't reached it since, directly or through a
+    stack of branch PRs merged later) out of pr_urls, into
     unmerged_prs as state BRANCH with the last merged PR and the next step: the
     open PR to the default branch, or the link that opens one. Returns how many
     tickets it touched. Best-effort: a lookup that fails leaves the PR as is."""
@@ -51,23 +52,32 @@ def _off_branch_prs(tickets, token) -> int:
                 defaults[repo] = None
         return defaults[repo]
 
-    def _next_step(repo, base, default):
-        if (repo, base) not in covered:
+    def _reached(repo, branch, default, since, seen):
+        if github_client.compare_status(repo, default, branch, token) in ("behind", "identical"):
+            return True
+        for pr in github_client.branch_prs(repo, branch, None, token):
+            into = (pr.get("base") or {}).get("ref")
+            if not pr.get("merged_at") or pr["merged_at"] < since or into in seen:
+                continue
+            if into == default or (len(seen) < 5 and _reached(repo, into, default, pr["merged_at"], seen | {into})):
+                return True
+        return False
+
+    def _next_step(repo, base, default, since):
+        if (repo, base, since) not in covered:
             nxt = f"https://github.com/{config.GITHUB_ORG}/{repo}/compare/{default}...{base}?expand=1"
             try:
-                if github_client.compare_status(repo, default, base, token) in ("behind", "identical"):
+                if _reached(repo, base, default, since, {base}):
                     nxt = None
                 else:
                     for pr in github_client.branch_prs(repo, base, default, token):
-                        if pr.get("merged_at"):
-                            nxt = None
-                            break
                         if pr.get("state") == "open":
                             nxt = pr.get("html_url") or nxt
+                            break
             except (Exception, SystemExit):
                 nxt = None
-            covered[(repo, base)] = nxt
-        return covered[(repo, base)]
+            covered[(repo, base, since)] = nxt
+        return covered[(repo, base, since)]
 
     touched = 0
     for t in tickets:
@@ -80,10 +90,10 @@ def _off_branch_prs(tickets, token) -> int:
                 groups[(repo, base, default)].append((pr.get("merged_at"), u, pr.get("number")))
         moved = []
         for (repo, base, default), prs in groups.items():
-            nxt = _next_step(repo, base, default)
+            prs.sort()
+            nxt = _next_step(repo, base, default, prs[-1][0])
             if nxt is None:
                 continue
-            prs.sort()
             moved += [u for _a, u, _n in prs]
             t.unmerged_prs.append({
                 "url": prs[-1][1], "state": "BRANCH", "repo": repo, "base": base,
