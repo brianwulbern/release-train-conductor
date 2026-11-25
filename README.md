@@ -77,6 +77,10 @@ editor uses a YAML parser only to find which line holds the target key, then swa
 on that line with a text replacement, keeping indentation, quote style and the inline comment.
 Image tags keep their packaged-version prefix (an nginx `1.31.2-` or a `2.541.3-lts-jdk21-` base
 that moves on its own schedule), unless the registry reports the exact published tag, which wins.
+When one build publishes several variants (a search image built on two major versions), the bump
+stays on the chart's track: its exact base if that tag exists, else the newest tag on the same
+major, so a base that moved from `8.19.23-` to `8.19.26-` follows along while a `9.x` variant
+pushed later is never picked up by accident (`conductor/docker_client.py`).
 
 ### The release ladder (`conductor/commands/finalize.py`, `conductor/ladder.py`)
 
@@ -188,6 +192,7 @@ conductor/
   yaml_edit.py         locate-then-replace YAML edits (byte-minimal diffs)
   yaml_utils.py        chart value lookup, tag prefix rules, new-value composition
   repos_config.py      per-repo facts, loaded from repos.yaml (a small generic sample)
+  docker_client.py     which published tag a bump writes when a build ships several
   ladder.py            ladder health: diagnose and plan a repair
   jira_client.py       tracker REST client
   jira_progress.py     checklist progress: close the prefix, start the current step
